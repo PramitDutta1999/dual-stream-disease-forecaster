@@ -58,7 +58,7 @@ AI research has an environmental cost. Carbon emissions for this project were es
 * **Compute Infrastructure:** Digital Research Alliance of Canada (Rorquial cluster)
 * **Hardware:** 1x NVIDIA H100 80GB GPU
 * **Total Training Time:** ~1.5 GPU hours (including full hyperparameter grid search)
-* **Carbon Emitted:** 0.52 kg CO2 eq. (Equivalent to 2.1 km driven by an average gasoline-powered car).
+* **Carbon Emitted:** 0.04 kg CO2 eq.
 
 ## How to Run
 
