@@ -53,6 +53,25 @@ logging.basicConfig(
 logger = logging.getLogger("train")
 
 
+def load_secrets(project_root: Path | None = None) -> None:
+    """Dynamically loads secrets from secrets.txt into os.environ if not already present."""
+    if project_root is None:
+        project_root = Path(__file__).resolve().parent.parent if Path(__file__).resolve().parent.name == "scripts" else Path.cwd()
+    for candidate in [project_root / "secrets.txt", project_root.parent / "secrets.txt", Path("secrets.txt")]:
+        if candidate.exists():
+            try:
+                for line in candidate.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if "=" in line and not line.startswith("#"):
+                        k, v = line.split("=", 1)
+                        k, v = k.strip(), v.strip()
+                        if k and v and k not in os.environ:
+                            os.environ[k] = v
+            except Exception:
+                pass
+            break
+
+
 # ==============================================================================
 # 1. Pre-Run Verification & Dummy Overfitting Sanity Check
 # ==============================================================================
@@ -77,6 +96,7 @@ def run_sanity_check(
     seq_len = 32
     dummy_input_ids = torch.randint(3, config.vocab_size, (batch_size, seq_len), device=device)
     dummy_age_ids = torch.randint(0, 100, (batch_size, seq_len), device=device)
+    dummy_genomic_ids = torch.randint(0, config.genomic_vocab_size, (batch_size, seq_len), device=device)
     dummy_mask = torch.ones((batch_size, seq_len), dtype=torch.bool, device=device)
     dummy_pretrain_targets = torch.randint(3, config.vocab_size, (batch_size, seq_len), device=device)
     dummy_cls_targets = torch.randint(0, 2, (batch_size, config.num_classes), device=device).float()
@@ -87,6 +107,7 @@ def run_sanity_check(
             input_ids=dummy_input_ids,
             age_ids=dummy_age_ids,
             attention_mask=dummy_mask,
+            genomic_ids=dummy_genomic_ids,
         )
 
     expected_lm_shape = (batch_size, seq_len, config.vocab_size)
@@ -113,6 +134,7 @@ def run_sanity_check(
             input_ids=dummy_input_ids,
             age_ids=dummy_age_ids,
             attention_mask=dummy_mask,
+            genomic_ids=dummy_genomic_ids,
         )
 
         lm_loss = F.cross_entropy(
@@ -188,6 +210,7 @@ def train_stage1_pretrain(
 
             input_ids = batch["input_ids"].to(device)
             age_ids = batch["age_ids"].to(device)
+            genomic_ids = batch["genomic_ids"].to(device) if "genomic_ids" in batch else None
             attention_mask = batch["attention_mask"].to(device)
             targets = batch["targets"].to(device)
 
@@ -196,6 +219,7 @@ def train_stage1_pretrain(
                 input_ids=input_ids,
                 age_ids=age_ids,
                 attention_mask=attention_mask,
+                genomic_ids=genomic_ids,
             )
 
             loss = F.cross_entropy(
@@ -223,6 +247,7 @@ def train_stage1_pretrain(
                     break
                 input_ids = batch["input_ids"].to(device)
                 age_ids = batch["age_ids"].to(device)
+                genomic_ids = batch["genomic_ids"].to(device) if "genomic_ids" in batch else None
                 attention_mask = batch["attention_mask"].to(device)
                 targets = batch["targets"].to(device)
 
@@ -230,6 +255,7 @@ def train_stage1_pretrain(
                     input_ids=input_ids,
                     age_ids=age_ids,
                     attention_mask=attention_mask,
+                    genomic_ids=genomic_ids,
                 )
                 loss = F.cross_entropy(
                     out["lm_logits"].view(-1, config.vocab_size),
@@ -261,16 +287,99 @@ def train_stage1_pretrain(
 
 
 # ==============================================================================
-# 3. Multi-Label Evaluation Metrics
+# 3. Dynamic On-The-Fly Pre-Existing Diagnosis Mask & Multi-Label Metrics
 # ==============================================================================
+DEFAULT_TARGET_CODES = [
+    "444814009", "195662009", "10509002", "88805009", "230690007", "22298006",
+    "68496003", "44465007", "53741008", "233604007", "43878008", "65966004",
+    "126906006", "271737000", "64859006", "443165006", "49436004", "92691004",
+    "36971009", "75498004", "162573006", "424132000", "254637007", "39848009",
+    "26929004", "263102004", "72892002", "713197008", "62106007", "15777000",
+    "58150001", "162864005", "16114001", "70704007", "283371005", "314994000",
+    "284551006", "22325002", "723857007", "156073000",
+]
+
+DEFAULT_TARGET_TOKEN_IDS = [
+    885, 193, 24, 1301, 313, 298, 1090, 884, 929, None, 875, 1065, 54, 408,
+    1058, 878, 919, 1317, 778, 1180, 90, 849, 373, 821, 398, 382, 1146, 1109,
+    1027, 84, 977, 93, 88, 1106, 423, None, 426, 299, 1134, 81,
+]
+
+
+def load_target_token_ids(
+    vocab_path: Path | str = "data/vocab.json",
+    targets_path: Path | str = "data/target_conditions.csv",
+) -> tuple[list[str], list[int | None]]:
+    """Loads target condition codes and token IDs with dynamic file resolution and embedded fallback."""
+    target_codes = list(DEFAULT_TARGET_CODES)
+    search_target_paths = [
+        Path(targets_path),
+        Path("data") / Path(targets_path).name,
+        Path(__file__).resolve().parent.parent / "data" / "target_conditions.csv",
+        Path(__file__).resolve().parent / "data" / "target_conditions.csv",
+        Path(__file__).resolve().parent / "target_conditions.csv",
+        Path(__file__).resolve().parent.parent / "target_conditions.csv",
+    ]
+    for p in search_target_paths:
+        if p.exists():
+            try:
+                df = pd.read_csv(p)
+                if "CODE" in df.columns:
+                    target_codes = df["CODE"].astype(str).tolist()
+                    break
+            except Exception:
+                pass
+
+    token_ids = list(DEFAULT_TARGET_TOKEN_IDS)
+    search_vocab_paths = [
+        Path(vocab_path),
+        Path("data") / Path(vocab_path).name,
+        Path(__file__).resolve().parent.parent / "data" / "vocab.json",
+        Path(__file__).resolve().parent / "data" / "vocab.json",
+        Path(__file__).resolve().parent / "vocab.json",
+        Path(__file__).resolve().parent.parent / "vocab.json",
+    ]
+    for p in search_vocab_paths:
+        if p.exists():
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    vocab = json.load(f)
+                token_ids = [vocab.get(code, None) for code in target_codes]
+                break
+            except Exception:
+                pass
+
+    return target_codes, token_ids
+
+
+def build_pre_existing_mask(
+    input_ids: torch.Tensor,
+    target_token_ids: list[int | None],
+) -> torch.Tensor:
+    """Dynamically constructs pre-existing diagnosis mask [batch_size, 40] on the same device.
+
+    1.0 = incident / at-risk (condition token not found in patient history)
+    0.0 = pre-existing (condition token found anywhere in patient history)
+    """
+    batch_size = input_ids.size(0)
+    num_targets = len(target_token_ids)
+    mask = torch.ones((batch_size, num_targets), dtype=torch.float32, device=input_ids.device)
+    for j, tid in enumerate(target_token_ids):
+        if tid is not None:
+            has_token = (input_ids == tid).any(dim=1)
+            mask[has_token, j] = 0.0
+    return mask
+
+
 def evaluate_multilabel(
     model: DualStreamEHRTransformer,
     val_dl: torch.utils.data.DataLoader,
     device: torch.device,
+    target_token_ids: list[int | None],
     pos_weight: torch.Tensor | None = None,
     max_batches: int | None = None,
 ) -> dict[str, float]:
-    """Computes BCE loss, Sigmoid probabilities, Macro AUROC, mAP, and Accuracy."""
+    """Computes BCE loss with pre_existing_mask, zeroed Sigmoid probabilities, Macro AUROC, mAP, and Accuracy."""
     model.eval()
     all_targets = []
     all_probs = []
@@ -283,6 +392,7 @@ def evaluate_multilabel(
                 break
             input_ids = batch["input_ids"].to(device)
             age_ids = batch["age_ids"].to(device)
+            genomic_ids = batch["genomic_ids"].to(device) if "genomic_ids" in batch else None
             attention_mask = batch["attention_mask"].to(device)
             targets = batch["targets"].to(device)
 
@@ -290,11 +400,20 @@ def evaluate_multilabel(
                 input_ids=input_ids,
                 age_ids=age_ids,
                 attention_mask=attention_mask,
+                genomic_ids=genomic_ids,
             )
             logits = out["cls_logits"]
-            loss = F.binary_cross_entropy_with_logits(logits, targets, pos_weight=pos_weight)
 
-            probs = torch.sigmoid(logits)
+            # Dynamic on-the-fly pre-existing diagnosis mask [batch_size, 40]
+            mask = build_pre_existing_mask(input_ids, target_token_ids)
+
+            # Apply mask to validation loss calculation
+            loss = F.binary_cross_entropy_with_logits(
+                logits, targets, weight=mask, pos_weight=pos_weight
+            )
+
+            # Method A: Multiply output probabilities by mask (zero out pre-existing conditions)
+            probs = torch.sigmoid(logits) * mask
 
             val_loss_sum += loss.item() * len(targets)
             total_samples += len(targets)
@@ -307,7 +426,7 @@ def evaluate_multilabel(
 
     mean_bce = val_loss_sum / max(1, total_samples)
 
-    # 1. Macro-averaged AUROC (handle classes with only 1 class present gracefully)
+    # 1. Macro-averaged AUROC
     auc_scores = []
     for col in range(y_true.shape[1]):
         col_true = y_true[:, col]
@@ -349,8 +468,9 @@ def predict_probabilities(
     model: DualStreamEHRTransformer,
     data_loader: torch.utils.data.DataLoader,
     device: torch.device,
+    target_token_ids: list[int | None],
 ) -> tuple[list[str], np.ndarray]:
-    """Generates raw multi-label probabilities [N, 40] via Sigmoid activation for every patient."""
+    """Generates multi-label probabilities [N, 40] with Method A pre-existing mask zeroing out."""
     model.eval()
     patient_ids = []
     all_probs = []
@@ -359,15 +479,19 @@ def predict_probabilities(
         for batch in data_loader:
             input_ids = batch["input_ids"].to(device)
             age_ids = batch["age_ids"].to(device)
+            genomic_ids = batch["genomic_ids"].to(device) if "genomic_ids" in batch else None
             attention_mask = batch["attention_mask"].to(device)
 
             out = model(
                 input_ids=input_ids,
                 age_ids=age_ids,
                 attention_mask=attention_mask,
+                genomic_ids=genomic_ids,
             )
-            # Apply Sigmoid to classification logits to output raw probabilities (not hard labels)
-            probs = torch.sigmoid(out["cls_logits"])
+
+            # Apply Method A: Multiply probabilities by mask to force pre-existing conditions to 0.0
+            mask = build_pre_existing_mask(input_ids, target_token_ids)
+            probs = torch.sigmoid(out["cls_logits"]) * mask
 
             patient_ids.extend(batch["patient_ids"])
             all_probs.append(probs.cpu().numpy())
@@ -396,6 +520,11 @@ def run_finetune_grid_search(
     and saves the best model for Hugging Face Hub upload.
     """
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
+    if not vocab_source_path.exists():
+        fallback_vocab = Path(__file__).resolve().parent.parent / "data" / "vocab.json"
+        if fallback_vocab.exists():
+            vocab_source_path = fallback_vocab
+    target_codes, target_token_ids = load_target_token_ids(vocab_source_path)
     best_overall_map = -1.0
     best_run_info: dict[str, Any] = {}
 
@@ -419,7 +548,7 @@ def run_finetune_grid_search(
             # CRITICAL CLUSTER RULE: wandb.save() is NEVER used; compute nodes block outbound uploads
             try:
                 run = wandb.init(
-                    project="ehr-prediction-prototype",
+                    project="prediction-patient-history",
                     settings=wandb.Settings(start_method="fork"),
                     name=run_name,
                     mode=wandb_mode,
@@ -436,7 +565,7 @@ def run_finetune_grid_search(
             except Exception:
                 # Fallback if start_method='fork' is not supported on host OS (e.g. Windows)
                 run = wandb.init(
-                    project="ehr-prediction",
+                    project="prediction-patient-history",
                     name=run_name,
                     mode=wandb_mode,
                     config={
@@ -500,6 +629,7 @@ def run_finetune_grid_search(
                         break
                     input_ids = batch["input_ids"].to(device)
                     age_ids = batch["age_ids"].to(device)
+                    genomic_ids = batch["genomic_ids"].to(device) if "genomic_ids" in batch else None
                     attention_mask = batch["attention_mask"].to(device)
                     targets = batch["targets"].to(device)
 
@@ -508,9 +638,26 @@ def run_finetune_grid_search(
                         input_ids=input_ids,
                         age_ids=age_ids,
                         attention_mask=attention_mask,
+                        genomic_ids=genomic_ids,
                     )
 
-                    loss = criterion(out["cls_logits"], targets)
+                    # Dynamic On-The-Fly Pre-Existing Diagnosis Mask [batch_size, 40]
+                    mask = build_pre_existing_mask(input_ids, target_token_ids)
+
+                    # Runtime shape verification on the first batch
+                    if step == 0 and epoch == 1:
+                        print(
+                            f"[Verification] Batch 0 pre_existing_mask shape: {tuple(mask.shape)} "
+                            f"exactly matches targets shape: {tuple(targets.shape)} (device: {mask.device})"
+                        )
+                        assert mask.shape == targets.shape, (
+                            f"Mask shape {mask.shape} does not match targets shape {targets.shape}"
+                        )
+
+                    # Method A: Pass mask as sample/element weights into BCEWithLogits loss
+                    loss = F.binary_cross_entropy_with_logits(
+                        out["cls_logits"], targets, weight=mask, pos_weight=pos_weight
+                    )
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()
@@ -520,9 +667,14 @@ def run_finetune_grid_search(
 
                 train_bce = train_loss_sum / max(1, total_samples)
 
-                # Validation Evaluation
+                # Validation Evaluation with Method A masking
                 metrics = evaluate_multilabel(
-                    model, val_dl, device, pos_weight=pos_weight, max_batches=max_batches
+                    model,
+                    val_dl,
+                    device,
+                    target_token_ids=target_token_ids,
+                    pos_weight=pos_weight,
+                    max_batches=max_batches,
                 )
                 elapsed = time.time() - t0
 
@@ -567,8 +719,6 @@ def run_finetune_grid_search(
                         json.dump(asdict(config), f, indent=2)
                     if vocab_source_path.exists():
                         shutil.copy2(vocab_source_path, checkpoints_dir / "vocab.json")
-                    elif (Path("data") / vocab_source_path.name).exists():
-                        shutil.copy2(Path("data") / vocab_source_path.name, checkpoints_dir / "vocab.json")
                     with open(checkpoints_dir / "eval_summary.json", "w", encoding="utf-8") as f:
                         json.dump(best_run_info, f, indent=2)
 
@@ -612,18 +762,13 @@ def main():
     parser.add_argument("--checkpoints_dir", type=Path, default=Path("checkpoints/best_model"))
     parser.add_argument("--vocab_path", type=Path, default=Path("data/vocab.json"))
 
+    parser.add_argument("--genomics_dir", type=Path, default=Path("genomics"), help="Directory containing genomics files (default: genomics)")
     parser.add_argument("--export_predictions", action="store_true", default=True, help="Export predictions.csv for test cohort (default: True)")
 
     args = parser.parse_args()
 
-    if not args.vocab_path.exists():
-        for candidate in [
-            Path("data") / args.vocab_path.name,
-            Path(__file__).resolve().parent.parent / "data" / args.vocab_path.name,
-        ]:
-            if candidate.exists():
-                args.vocab_path = candidate
-                break
+    # Dynamically inject credentials from secrets.txt if not already in environment
+    load_secrets()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using compute device: {device}")
@@ -675,9 +820,8 @@ def main():
     # Step 4: Export predictions.csv for held-out test cohort
     if args.export_predictions:
         best_model_path = args.checkpoints_dir / "pytorch_model.bin"
-        targets_file = Path("data/target_conditions.csv") if Path("data/target_conditions.csv").exists() else Path("target_conditions.csv")
-        if best_model_path.exists() and targets_file.exists():
-            logger.info("Generating predictions.csv on held-out test cohort...")
+        if best_model_path.exists():
+            logger.info("Generating predictions.csv on held-out test cohort (with Method A pre-existing mask applied)...")
             best_model = DualStreamEHRTransformer(config).to(device)
             best_model.load_state_dict(torch.load(best_model_path, map_location=device))
 
@@ -688,15 +832,15 @@ def main():
                 include_test=True,
             )
 
-            pids, test_probs = predict_probabilities(best_model, test_dl, device)
-
-            targets_df = pd.read_csv(targets_file)
-            target_codes = targets_df["CODE"].astype(str).tolist()
+            target_codes, target_token_ids = load_target_token_ids(args.vocab_path, "data/target_conditions.csv")
+            pids, test_probs = predict_probabilities(
+                best_model, test_dl, device, target_token_ids=target_token_ids
+            )
 
             pred_df = pd.DataFrame(test_probs, columns=target_codes)
             pred_df.insert(0, "patient_id", pids)
             pred_df.to_csv("predictions.csv", index=False)
-            logger.info(f"Saved predictions.csv with shape {pred_df.shape} for submission.")
+            logger.info(f"Saved predictions.csv with shape {pred_df.shape} for submission (pre-existing forced to 0.0).")
 
     total_time = time.time() - t_start
 

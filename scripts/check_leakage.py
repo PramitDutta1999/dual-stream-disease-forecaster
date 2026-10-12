@@ -6,20 +6,10 @@ clinical tables and strictly asserting zero dates occur on or after patient anch
 
 from __future__ import annotations
 
-import sys
-
-# Prevent scripts/tokenize.py from shadowing Python's standard library tokenize
-_scripts_dir = sys.path[0] if sys.path else ""
-if sys.path and ("scripts" in sys.path[0] or sys.path[0].replace("\\", "/").rstrip("/").endswith("/scripts")):
-    del sys.path[0]
-import tokenize as _stdlib_tokenize
-
-if _scripts_dir and _scripts_dir not in sys.path:
-    sys.path.insert(0, _scripts_dir)
-
 import argparse
 import logging
 from pathlib import Path
+import sys
 import pandas as pd
 
 logging.basicConfig(
@@ -45,7 +35,17 @@ CLINICAL_FILES = [
 def load_anchors(anchors_path: Path) -> pd.Series:
     """Loads anchor dates mapping: patient_id -> anchor_date."""
     if not anchors_path.exists():
-        raise FileNotFoundError(f"Anchors file not found: {anchors_path}")
+        fallback_candidates = [
+            Path("data") / anchors_path.name,
+            Path(__file__).resolve().parent.parent / "data" / anchors_path.name,
+            Path(__file__).resolve().parent / "data" / anchors_path.name,
+        ]
+        for fb in fallback_candidates:
+            if fb.exists():
+                anchors_path = fb
+                break
+        else:
+            raise FileNotFoundError(f"Anchors file not found: {anchors_path}")
 
     anchors_df = pd.read_csv(anchors_path)
     id_col = None
@@ -173,23 +173,23 @@ def main():
         default=Path("truncated_train_val"),
         help="Path to truncated directory (default: truncated_train_val)",
     )
+    def resolve_anchors_path(filename: str = "train_anchors.csv") -> Path:
+        p_data = Path("data") / filename
+        if p_data.exists():
+            return p_data
+        p_root = Path(__file__).resolve().parent.parent / "data" / filename
+        if p_root.exists():
+            return p_root
+        return Path(filename)
+
     parser.add_argument(
         "--anchors_path",
         type=Path,
-        default=Path("data/train_anchors.csv"),
+        default=resolve_anchors_path("train_anchors.csv"),
         help="Path to computed anchor dates CSV (default: data/train_anchors.csv)",
     )
 
     args = parser.parse_args()
-
-    if not args.anchors_path.exists():
-        for candidate in [
-            Path("data") / args.anchors_path.name,
-            Path(__file__).resolve().parent.parent / "data" / args.anchors_path.name,
-        ]:
-            if candidate.exists():
-                args.anchors_path = candidate
-                break
 
     logger.info("Loading patient anchor dates...")
     anchor_map = load_anchors(args.anchors_path)

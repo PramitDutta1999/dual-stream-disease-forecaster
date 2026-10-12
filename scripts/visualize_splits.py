@@ -30,7 +30,17 @@ import torch
 def load_splits(splits_path: Path) -> dict[str, list[str]]:
     """Loads patient_splits.csv and returns dictionary mapping split -> list of patient IDs."""
     if not splits_path.exists():
-        raise FileNotFoundError(f"Splits file not found: {splits_path}")
+        fallback_candidates = [
+            Path("data") / splits_path.name,
+            Path(__file__).resolve().parent.parent / "data" / splits_path.name,
+            Path(__file__).resolve().parent / "data" / splits_path.name,
+        ]
+        for fb in fallback_candidates:
+            if fb.exists():
+                splits_path = fb
+                break
+        else:
+            raise FileNotFoundError(f"Splits file not found: {splits_path}")
 
     df = pd.read_csv(splits_path)
     splits = {}
@@ -42,7 +52,17 @@ def load_splits(splits_path: Path) -> dict[str, list[str]]:
 def load_tokenized_patient_ids(data_path: Path) -> dict[str, list[str]]:
     """Loads tokenized dataset and extracts patient IDs per split."""
     if not data_path.exists():
-        raise FileNotFoundError(f"Tokenized data file not found: {data_path}")
+        fallback_candidates = [
+            Path("data") / data_path.name,
+            Path(__file__).resolve().parent.parent / "data" / data_path.name,
+            Path(__file__).resolve().parent / "data" / data_path.name,
+        ]
+        for fb in fallback_candidates:
+            if fb.exists():
+                data_path = fb
+                break
+        else:
+            raise FileNotFoundError(f"Tokenized data file not found: {data_path}")
 
     raw_data = torch.load(data_path)
     actual_ids: dict[str, list[str]] = {"train": [], "val": [], "test": []}
@@ -138,16 +158,25 @@ def main():
     parser = argparse.ArgumentParser(
         description="Verify patient cohort splits and generate distribution visualization."
     )
+    def resolve_path(filename: str) -> Path:
+        p_data = Path("data") / filename
+        if p_data.exists():
+            return p_data
+        p_root = Path(__file__).resolve().parent.parent / "data" / filename
+        if p_root.exists():
+            return p_root
+        return Path(filename)
+
     parser.add_argument(
         "--splits_path",
         type=Path,
-        default=Path("data/patient_splits.csv"),
+        default=resolve_path("patient_splits.csv"),
         help="Path to patient_splits.csv (default: data/patient_splits.csv)",
     )
     parser.add_argument(
         "--data_path",
         type=Path,
-        default=Path("data/tokenized_data.pt"),
+        default=resolve_path("tokenized_data.pt"),
         help="Path to tokenized_data.pt (default: data/tokenized_data.pt)",
     )
     parser.add_argument(
@@ -158,17 +187,6 @@ def main():
     )
 
     args = parser.parse_args()
-
-    for attr in ["splits_path", "data_path"]:
-        p = getattr(args, attr)
-        if not p.exists():
-            for candidate in [
-                Path("data") / p.name,
-                Path(__file__).resolve().parent.parent / "data" / p.name,
-            ]:
-                if candidate.exists():
-                    setattr(args, attr, candidate)
-                    break
 
     # Step 1: Load expected splits
     expected_splits = load_splits(args.splits_path)

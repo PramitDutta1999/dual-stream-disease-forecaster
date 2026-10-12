@@ -303,46 +303,60 @@ def main():
         default=Path("train_val"),
         help="Path to full train_val directory (for ground-truth targets) (default: train_val)",
     )
+    def resolve_input_path(filename: str) -> Path:
+        p_data = Path("data") / filename
+        if p_data.exists():
+            return p_data
+        p_root = Path(__file__).resolve().parent.parent / "data" / filename
+        if p_root.exists():
+            return p_root
+        return Path(filename)
+
+    def resolve_output_path(filename: str) -> Path:
+        if Path("data").exists():
+            return Path("data") / filename
+        return Path(filename)
+
     parser.add_argument(
         "--splits_path",
         type=Path,
-        default=Path("data/patient_splits.csv"),
+        default=resolve_input_path("patient_splits.csv"),
         help="Path to patient_splits.csv (default: data/patient_splits.csv)",
     )
     parser.add_argument(
         "--targets_path",
         type=Path,
-        default=Path("data/target_conditions.csv"),
+        default=resolve_input_path("target_conditions.csv"),
         help="Path to target_conditions.csv (default: data/target_conditions.csv)",
     )
     parser.add_argument(
         "--train_anchors_path",
         type=Path,
-        default=Path("data/train_anchors.csv"),
+        default=resolve_input_path("train_anchors.csv"),
         help="Path to train_anchors.csv (default: data/train_anchors.csv)",
     )
     parser.add_argument(
         "--test_anchors_path",
         type=Path,
-        default=Path("data/test_anchors.csv"),
+        default=resolve_input_path("test_anchors.csv"),
         help="Path to test_anchors.csv (default: data/test_anchors.csv)",
     )
     parser.add_argument(
         "--vocab_path",
         type=Path,
-        default=Path("data/vocab.json"),
+        default=resolve_output_path("vocab.json"),
         help="Output path for vocabulary JSON (default: data/vocab.json)",
     )
     parser.add_argument(
         "--output_pt",
         type=Path,
-        default=Path("data/tokenized_data.pt"),
+        default=resolve_output_path("tokenized_data.pt"),
         help="Output path for PyTorch-ready dataset (default: data/tokenized_data.pt)",
     )
     parser.add_argument(
         "--output_json",
         type=Path,
-        default=Path("data/tokenized_data.json"),
+        default=resolve_output_path("tokenized_data.json"),
         help="Output path for JSON dataset (default: data/tokenized_data.json)",
     )
     parser.add_argument(
@@ -354,16 +368,22 @@ def main():
 
     args = parser.parse_args()
 
-    # Resolve input paths with fallback to data/ directory
-    for attr in ["splits_path", "targets_path", "train_anchors_path", "test_anchors_path"]:
-        p = getattr(args, attr)
-        if not p.exists():
-            for candidate in [
-                Path("data") / p.name,
-                Path(__file__).resolve().parent.parent / "data" / p.name,
-            ]:
-                if candidate.exists():
-                    setattr(args, attr, candidate)
+    for attr, name in [
+        ("splits_path", "patient_splits.csv"),
+        ("targets_path", "target_conditions.csv"),
+        ("train_anchors_path", "train_anchors.csv"),
+        ("test_anchors_path", "test_anchors.csv"),
+    ]:
+        val = getattr(args, attr)
+        if not val.exists():
+            fallback_candidates = [
+                Path("data") / name,
+                Path(__file__).resolve().parent.parent / "data" / name,
+                Path(__file__).resolve().parent / "data" / name,
+            ]
+            for fb in fallback_candidates:
+                if fb.exists():
+                    setattr(args, attr, fb)
                     break
 
     t_start = time.time()

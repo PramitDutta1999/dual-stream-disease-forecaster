@@ -1,20 +1,34 @@
+# Python virtual environments & cache
 .venv/
+venv/
+env/
 __pycache__/
+*.py[cod]
+*$py.class
+
+# Model checkpoints & heavy binaries
 checkpoints/
-wandb/
-data/
-genomics/
-logs/
-reports/
-test/
-train_val/
-truncated_train_val/
-secrets.txt
-*.csv
-!predictions.csv
-*.json
 *.pt
 *.bin
 *.safetensors
-*.jpg
-*.png
+
+# HPC runs, tracking, and reports
+logs/
+wandb/
+reports/
+
+# Heavy synthetic datasets & cohort tables
+data/
+genomics/
+test/
+train_val/
+truncated_train_val/
+
+# Sensitive credentials
+secrets.txt
+api_key.txt
+*.key
+*.pem
+
+# Explicitly ensure predictions.csv is tracked and NOT ignored
+!predictions.csv

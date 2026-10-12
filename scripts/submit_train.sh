@@ -4,9 +4,9 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --time=01:00:00
+#SBATCH --time=00:30:00
 #SBATCH --output=logs/train-%j.out
-#SBATCH --mail-user=your_email@example.com
+#SBATCH --mail-user=your_email@domain.com
 #SBATCH --mail-type=BEGIN,END,FAIL
 
 # Load environment modules
@@ -19,8 +19,13 @@ source $SLURM_TMPDIR/env/bin/activate
 # Install project dependencies from Compute Canada wheel cache
 pip install --no-index -r requirements.txt
 
-# Weights & Biases configuration (strictly offline for compute nodes)
-export WANDB_API_KEY="${WANDB_API_KEY}"
+# Credentials configuration (loaded from environment or local secrets.txt)
+if [ -f "secrets.txt" ]; then
+    export WANDB_API_KEY="${WANDB_API_KEY:-$(grep -E '^WANDB_API_KEY=' secrets.txt | cut -d '=' -f2-)}"
+    export HF_TOKEN="${HF_TOKEN:-$(grep -E '^HF_TOKEN=' secrets.txt | cut -d '=' -f2-)}"
+fi
+export WANDB_API_KEY="${WANDB_API_KEY:-your_wandb_api_key_here}"
+export HF_TOKEN="${HF_TOKEN:-your_hf_token_here}"
 wandb offline
 
 # Ensure logs directory exists

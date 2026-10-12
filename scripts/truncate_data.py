@@ -6,21 +6,11 @@ all clinical tables in train_val/ to prevent data leakage into the future.
 
 from __future__ import annotations
 
-import sys
-
-# Prevent scripts/tokenize.py from shadowing Python's standard library tokenize
-_scripts_dir = sys.path[0] if sys.path else ""
-if sys.path and ("scripts" in sys.path[0] or sys.path[0].replace("\\", "/").rstrip("/").endswith("/scripts")):
-    del sys.path[0]
-import tokenize as _stdlib_tokenize
-
-if _scripts_dir and _scripts_dir not in sys.path:
-    sys.path.insert(0, _scripts_dir)
-
 import argparse
 import logging
 from pathlib import Path
 import shutil
+import sys
 import time
 import pandas as pd
 
@@ -176,10 +166,11 @@ def main():
         default=Path("truncated_train_val"),
         help="Path to output truncated directory (default: truncated_train_val)",
     )
+    default_anchors = Path("data/train_anchors.csv") if Path("data").exists() else Path("train_anchors.csv")
     parser.add_argument(
         "--anchors_path",
         type=Path,
-        default=Path("data/train_anchors.csv"),
+        default=default_anchors,
         help="Path to export computed anchor dates (default: data/train_anchors.csv)",
     )
     parser.add_argument(

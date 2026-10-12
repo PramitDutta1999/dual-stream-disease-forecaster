@@ -294,6 +294,17 @@ class DualStreamEHRTransformer(nn.Module):
             for block in self.genomic_blocks:
                 x_genomic, _ = block(x_genomic, output_attentions=False)
             genomic_out = self.genomic_ln(x_genomic)
+
+            # Explicit zero-out for individual patients who lack genomics in a mixed batch
+            patient_has_genomics = (genomic_ids != 0).any(dim=1, keepdim=True).unsqueeze(-1)  # [B, 1, 1]
+            genomic_out = genomic_out * patient_has_genomics.float()
+
+            # Align sequence length between streams if needed
+            if genomic_out.shape[1] < clinical_out.shape[1]:
+                pad_len = clinical_out.shape[1] - genomic_out.shape[1]
+                genomic_out = F.pad(genomic_out, (0, 0, 0, pad_len), value=0.0)
+            elif genomic_out.shape[1] > clinical_out.shape[1]:
+                genomic_out = genomic_out[:, :clinical_out.shape[1], :]
         else:
             # Explicit zero-out of the genomics stream
             genomic_out = torch.zeros_like(clinical_out)
