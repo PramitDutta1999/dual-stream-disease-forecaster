@@ -8,7 +8,7 @@ This repository contains the code, data processing scripts, and training pipelin
 
 The core objective of this project is to model a patient's medical history as a stream of timestamped clinical events (diagnoses, medications, procedures, and labs). The model predicts which *new* clinical conditions will be diagnosed in the five years following a specific "anchor date" (defined as five years prior to the patient's last recorded encounter). Conditions pre-existing before the anchor date are dynamically masked to ensure predictions strictly represent incident occurrences.
 
-**Hugging Face Hub:** [PramitDutta1999/ehr-dual-stream-transformer](https://huggingface.co/PramitDutta1999/ehr-dual-stream-transformer)
+**Hugging Face Hub:** [PramitDutta1999/ehr-dual-stream-transformer](https://huggingface.co/pramit-dutta/ehr-dual-stream-transformer)
 
 ## Model Architecture
 
