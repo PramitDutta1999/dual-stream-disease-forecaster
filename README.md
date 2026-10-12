@@ -12,7 +12,7 @@ The core objective of this project is to model a patient's medical history as a 
 
 ## Model Architecture
 
-![Dual-Stream Architecture](architecture.png)
+![Dual-Stream Architecture](modelarchitecture.png)
 
 The `DualStreamEHRTransformer` is a lightweight, highly optimized causal transformer (~8.1M parameters). 
 * **Streams:** Features a dedicated clinical stream and a parallel genomic stream, fused via linear projection.
