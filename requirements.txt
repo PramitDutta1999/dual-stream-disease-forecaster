@@ -1,0 +1,7 @@
+# Dual-Stream EHR Patient Timeline Modeling Pipeline Dependencies
+torch>=2.0.0
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+wandb>=0.16.0
+matplotlib>=3.7.0
